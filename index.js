@@ -1,3 +1,4 @@
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -16,14 +17,10 @@ function getAiInstance() {
     }
     return ai;
 }
-
-
 // --- Core Application Logic ---
 document.addEventListener('DOMContentLoaded', () => {
 
     // --- DOM Elements ---
-    const permissionPrompt = document.getElementById('permission-prompt');
-    const enablePermissionsBtn = document.getElementById('enable-permissions-btn');
     const setupControls = document.getElementById('setup-controls');
     const callInProgressControls = document.getElementById('call-in-progress-controls');
     const createMeetingBtn = document.getElementById('create-meeting-btn');
@@ -33,6 +30,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const meetingInfoContainer = document.getElementById('meeting-info-container');
     const meetingIdDisplay = document.getElementById('meeting-id-display');
     const copyIdBtn = document.getElementById('copy-id-btn');
+    const toggleMicBtn = document.getElementById('toggle-mic-btn');
+    const toggleCameraBtn = document.getElementById('toggle-camera-btn');
 
     const statusIndicator = document.getElementById('status');
     const statusText = statusIndicator.querySelector('.status-text');
@@ -85,11 +84,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // --- Event Listeners ---
-    enablePermissionsBtn.addEventListener('click', requestMediaPermissions);
     createMeetingBtn.addEventListener('click', createMeeting);
     joinMeetingBtn.addEventListener('click', joinMeeting);
     endMeetingBtn.addEventListener('click', endMeeting);
     copyIdBtn.addEventListener('click', copyInvitationLink);
+    toggleMicBtn.addEventListener('click', toggleMicrophone);
+    toggleCameraBtn.addEventListener('click', toggleCamera);
+
 
     delaySlider.addEventListener('input', (e) => {
         translationDelay = parseInt(e.target.value, 10);
@@ -101,35 +102,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Core App Logic ---
-    
-    async function requestMediaPermissions() {
-        enablePermissionsBtn.disabled = true;
-        enablePermissionsBtn.textContent = 'Enabling...';
-        hideError();
-
-        try {
-            // Request permissions AND get the stream to use later.
-            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-            
-            // Show the user their own video immediately as feedback.
-            localParticipant.querySelector('.placeholder').style.display = 'none';
-            userVideo.style.display = 'block';
-            userVideo.srcObject = mediaStream;
-
-            permissionPrompt.style.display = 'none';
-            setupControls.style.display = 'flex';
-        } catch (error) {
-            console.error("Permission error:", error);
-            const errorMessage = error.name === 'NotAllowedError'
-                ? 'Permission denied. Please allow camera and microphone access in your browser settings and refresh the page.'
-                : 'Could not access camera/microphone. Please ensure they are not in use by another application and refresh the page.';
-            showError(errorMessage);
-            enablePermissionsBtn.disabled = false;
-            enablePermissionsBtn.textContent = 'Enable Camera & Microphone';
-        }
-    }
-
-
     function getSystemInstruction() {
         const sourceLang = sourceLangSelect.value;
         const targetLang = targetLangSelect.value;
@@ -161,33 +133,36 @@ document.addEventListener('DOMContentLoaded', () => {
         transcriptionPanel.innerHTML = '';
         setupControls.style.display = 'none';
 
-        if (!mediaStream) {
-            showError("Media stream not found. Please enable your camera and microphone first.");
-            resetUI();
-            return;
-        }
-
         try {
-            // --- NEW WEB AUDIO API PIPELINE ---
-            // 1. Create a single, central AudioContext.
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            // STEP 1: Request permissions and get media stream. This is the new entry point.
+            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+            
+            // Show the user their own video immediately as feedback.
+            localParticipant.querySelector('.placeholder').style.display = 'none';
+            userVideo.style.display = 'block';
+            userVideo.srcObject = mediaStream;
+
+
+            // STEP 2: Build the Web Audio API pipeline.
+            // THIS IS THE KEY FIX: Initialize the AudioContext at the target sample rate required by Gemini.
+            // This prevents risky real-time resampling and resolves the hardware resource conflict.
+            const targetSampleRate = 16000;
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: targetSampleRate });
+            
             if (audioContext.state === 'suspended') {
                 await audioContext.resume();
             }
 
-            // 2. Create a source node from the original microphone stream.
             const sourceNode = audioContext.createMediaStreamSource(mediaStream);
-
-            // 3. Create a destination node. Its output stream will be sent to PeerJS.
             const peerDestinationNode = audioContext.createMediaStreamAudioDestinationNode();
-
-            // 4. Create a script processor to capture raw audio for Gemini.
             scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
 
             scriptProcessor.onaudioprocess = (event) => {
                 if (!sessionPromise) return; // Don't process until Gemini is ready.
                 const inputData = event.inputBuffer.getChannelData(0);
-                const resampledData = resampleBuffer(inputData, 16000); // Resampling is still critical.
+                // The resampleBuffer function will now correctly identify that the sample rate already matches
+                // and will pass the data through without expensive processing.
+                const resampledData = resampleBuffer(inputData, targetSampleRate);
                 const pcmBlob = createBlob(resampledData);
                 sessionPromise.then((session) => {
                     if (session) {
@@ -198,21 +173,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             };
 
-            // 5. Connect the audio graph:
-            // Mic Source -> Gemini Processor -> PeerJS Destination
+            // Connect the audio graph: Mic Source -> Gemini Processor -> PeerJS Destination
             sourceNode.connect(scriptProcessor);
             scriptProcessor.connect(peerDestinationNode);
-            // Connect processor to main output to prevent it from being garbage-collected in some browsers.
+            // Connect processor to main output to prevent it from being garbage-collected.
             scriptProcessor.connect(audioContext.destination);
 
-            // 6. Create the final stream for PeerJS by combining video and the processed audio.
+            // Create the final stream for PeerJS by combining video and the processed audio.
             const videoTracks = mediaStream.getVideoTracks();
             peerStream = new MediaStream([
                 ...videoTracks,
                 peerDestinationNode.stream.getAudioTracks()[0]
             ]);
 
-            // 7. Initialize PeerJS with the clean, processed stream.
+
+            // STEP 3: Initialize PeerJS with the clean, processed stream.
             initializePeer(isJoining);
 
             isMeetingActive = true;
@@ -221,14 +196,17 @@ document.addEventListener('DOMContentLoaded', () => {
             
         } catch (error) {
             console.error("Error during meeting start:", error);
-            const errorMessage = "Failed to start. Check permissions and try again.";
+            let errorMessage = "Failed to start. Check permissions and try again.";
+            if (error.name === 'NotAllowedError') {
+                 errorMessage = 'Permission denied. Please allow camera and microphone access to start a meeting.';
+            }
             showError(errorMessage);
             endMeeting();
         }
     }
 
     function endMeeting() {
-        if (!isMeetingActive) return;
+        if (!isMeetingActive && !mediaStream) return; // Prevent multiple calls
 
         console.log("Ending meeting...");
 
@@ -238,7 +216,6 @@ document.addEventListener('DOMContentLoaded', () => {
             mediaStream = null;
         }
         peerStream = null;
-
 
         // Close Gemini session
         if (sessionPromise) {
@@ -275,14 +252,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     function resetUI() {
-        // Hide in-progress controls and show permission prompt
+        // Hide in-progress controls and show setup controls
         callInProgressControls.style.display = 'none';
         meetingInfoContainer.style.display = 'none';
-        setupControls.style.display = 'none';
-        permissionPrompt.style.display = 'flex';
-        enablePermissionsBtn.disabled = false;
-        enablePermissionsBtn.textContent = 'Enable Camera & Microphone';
-
+        setupControls.style.display = 'flex';
 
         // Reset video elements
         userVideo.srcObject = null;
@@ -409,6 +382,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // It's the perfect time to initialize the Gemini transcription service.
         dataConnection.on('open', () => {
             if (!isTranscriptionSetup) {
+                // STEP 4: Initialize Gemini only after PeerJS connection is stable.
                 setupGeminiTranscription().catch(error => {
                     console.error("Gemini setup failed after connection:", error);
                     showError("Peer connection successful, but real-time transcription failed to start.");
@@ -453,8 +427,8 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStatus('connecting', 'Initializing transcription...');
         const genAI = getAiInstance();
 
-        // The AudioContext and ScriptProcessor are already running from startMeeting.
-        // We just need to establish the Gemini connection. The `onaudioprocess`
+        // The AudioContext and ScriptProcessor are already running.
+        // We just establish the Gemini connection. The `onaudioprocess`
         // handler will automatically start sending data once `sessionPromise` resolves.
         sessionPromise = genAI.live.connect({
           model: 'gemini-2.5-flash-native-audio-preview-09-2025',
@@ -540,6 +514,43 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function toggleMicrophone() {
+        if (!mediaStream) return;
+        const audioTracks = mediaStream.getAudioTracks();
+        if (audioTracks.length === 0) return;
+
+        audioTracks.forEach(track => {
+            track.enabled = !track.enabled;
+            if (track.enabled) {
+                toggleMicBtn.textContent = 'Mute Mic';
+                toggleMicBtn.classList.remove('muted');
+            } else {
+                toggleMicBtn.textContent = 'Unmute Mic';
+                toggleMicBtn.classList.add('muted');
+            }
+        });
+    }
+
+    function toggleCamera() {
+        if (!mediaStream) return;
+        const videoTracks = mediaStream.getVideoTracks();
+        if (videoTracks.length === 0) return;
+
+        videoTracks.forEach(track => {
+            track.enabled = !track.enabled;
+            if (track.enabled) {
+                toggleCameraBtn.textContent = 'Turn Off Camera';
+                toggleCameraBtn.classList.remove('muted');
+                localParticipant.querySelector('.placeholder').style.display = 'none';
+                userVideo.style.display = 'block';
+            } else {
+                toggleCameraBtn.textContent = 'Turn On Camera';
+                toggleCameraBtn.classList.add('muted');
+                localParticipant.querySelector('.placeholder').style.display = 'flex';
+                userVideo.style.display = 'none';
+            }
+        });
+    }
 
     function setLoadingState(isLoading, loadingText = 'Connecting...') {
         createMeetingBtn.disabled = isLoading;

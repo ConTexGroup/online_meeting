@@ -146,22 +146,6 @@ h1 {
     padding-top: 10px;
 }
 
-.permission-prompt {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    padding: 20px;
-    background-color: #2a2a2d;
-    border-radius: 8px;
-    border: 1px solid #444;
-}
-
-.permission-prompt p {
-    margin: 0;
-    font-size: 1.1em;
-}
-
 .setup-controls, .call-in-progress-controls {
     display: flex;
     width: 100%;
@@ -203,11 +187,11 @@ button:disabled {
     color: #999;
 }
 
-#end-meeting-btn {
+#end-meeting-btn, button.muted {
     background-color: #b72d2d;
 }
 
-#end-meeting-btn:hover:not(:disabled) {
+#end-meeting-btn:hover:not(:disabled), button.muted:hover:not(:disabled) {
     background-color: #d94545;
 }
 
