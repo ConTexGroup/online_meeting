@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import Peer from 'peerjs';
-import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
+import { GoogleGenAI, Modality } from "@google/genai";
 
 // --- AI Instance ---
 // Use the API key from the dedicated config file for deployment.
@@ -226,7 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function setupRemoteStream(call, onStreamCallback) {
         call.on('stream', (remoteStream) => {
-            if(onStreamCallback) onStreamCallback();
+            if (onStreamCallback) onStreamCallback();
             updateStatus('listening', 'Connected & Listening');
             remoteParticipant.querySelector('.placeholder').style.display = 'none';
             remoteVideo.style.display = 'block';
@@ -250,7 +250,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         dataConnection.on('open', () => {
-            dataConnection?.send({ type: 'name', name: localName });
+            dataConnection.send({ type: 'name', name: localName });
         });
     }
 
