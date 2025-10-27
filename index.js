@@ -12,6 +12,8 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 document.addEventListener('DOMContentLoaded', () => {
 
     // --- DOM Elements ---
+    const permissionPrompt = document.getElementById('permission-prompt');
+    const enablePermissionsBtn = document.getElementById('enable-permissions-btn');
     const setupControls = document.getElementById('setup-controls');
     const callInProgressControls = document.getElementById('call-in-progress-controls');
     const createMeetingBtn = document.getElementById('create-meeting-btn');
@@ -71,6 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // --- Event Listeners ---
+    enablePermissionsBtn.addEventListener('click', requestMediaPermissions);
     createMeetingBtn.addEventListener('click', createMeeting);
     joinMeetingBtn.addEventListener('click', joinMeeting);
     endMeetingBtn.addEventListener('click', endMeeting);
@@ -87,6 +90,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Core App Logic ---
     
+    async function requestMediaPermissions() {
+        enablePermissionsBtn.disabled = true;
+        enablePermissionsBtn.textContent = 'Enabling...';
+        hideError();
+
+        try {
+            // Request permissions to ensure they are granted before proceeding
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+            // Stop the tracks immediately, we just wanted to get permission
+            stream.getTracks().forEach(track => track.stop());
+            
+            permissionPrompt.style.display = 'none';
+            setupControls.style.display = 'flex';
+        } catch (error) {
+            console.error("Permission error:", error);
+            const errorMessage = error.name === 'NotAllowedError'
+                ? 'Permission denied. Please allow camera and microphone access in your browser settings and refresh the page.'
+                : 'Could not access camera/microphone. Please ensure they are not in use by another application and refresh the page.';
+            showError(errorMessage);
+            enablePermissionsBtn.disabled = false;
+            enablePermissionsBtn.textContent = 'Enable Camera & Microphone';
+        }
+    }
+
+
     function getSystemInstruction() {
         const sourceLang = sourceLangSelect.value;
         const targetLang = targetLangSelect.value;
@@ -185,10 +213,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     function resetUI() {
-        // Hide in-progress controls and show setup controls
+        // Hide in-progress controls and show permission prompt
         callInProgressControls.style.display = 'none';
         meetingInfoContainer.style.display = 'none';
-        setupControls.style.display = 'flex';
+        setupControls.style.display = 'none';
+        permissionPrompt.style.display = 'flex';
+        enablePermissionsBtn.disabled = false;
+        enablePermissionsBtn.textContent = 'Enable Camera & Microphone';
+
 
         // Reset video elements
         userVideo.srcObject = null;

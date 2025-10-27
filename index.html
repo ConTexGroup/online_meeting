@@ -67,7 +67,11 @@
         <!-- Subtitles will be injected here -->
       </div>
       <div class="controls">
-          <div id="setup-controls" class="setup-controls">
+          <div id="permission-prompt" class="permission-prompt">
+              <p>To start, please grant access to your camera and microphone.</p>
+              <button id="enable-permissions-btn">Enable Camera & Microphone</button>
+          </div>
+          <div id="setup-controls" class="setup-controls" style="display: none;">
               <div class="name-input-container">
                   <label for="name-input">Your Name:</label>
                   <input type="text" id="name-input" placeholder="Enter your name" value="User 1">
