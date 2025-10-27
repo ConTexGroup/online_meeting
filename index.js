@@ -187,7 +187,7 @@ document.addEventListener('DOMContentLoaded', () => {
             geminiMediaStream = new MediaStream([clonedAudioTrack]);
             
             initializePeer(isJoining);
-            setupGeminiTranscription();
+            await setupGeminiTranscription(); // Await this to catch setup errors
             
             isMeetingActive = true;
             callInProgressControls.style.display = 'flex';
@@ -386,10 +386,46 @@ document.addEventListener('DOMContentLoaded', () => {
             dataConnection.send({ type: 'name', name: localName });
         });
     }
+    
+    // --- The new "Paper Cutter" (Resampler) Function ---
+    function resampleBuffer(inputBuffer, targetSampleRate) {
+        if (!audioContext) return inputBuffer;
+        const inputSampleRate = audioContext.sampleRate;
+        if (inputSampleRate === targetSampleRate) {
+            return inputBuffer;
+        }
+        const sampleRateRatio = inputSampleRate / targetSampleRate;
+        const newLength = Math.round(inputBuffer.length / sampleRateRatio);
+        const result = new Float32Array(newLength);
+        let offsetResult = 0;
+        let offsetBuffer = 0;
+        while (offsetResult < result.length) {
+            const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+            let accum = 0;
+            let count = 0;
+            for (let i = offsetBuffer; i < nextOffsetBuffer && i < inputBuffer.length; i++) {
+                accum += inputBuffer[i];
+                count++;
+            }
+            result[offsetResult] = accum / count;
+            offsetResult++;
+            offsetBuffer = nextOffsetBuffer;
+        }
+        return result;
+    }
 
-    function setupGeminiTranscription() {
+
+    async function setupGeminiTranscription() {
         const genAI = getAiInstance();
-        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        
+        // Create AudioContext with the browser's default sample rate. DO NOT force 16000.
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+        // Check if the context was created successfully
+        if (!audioContext) {
+            throw new Error("Could not create AudioContext.");
+        }
+        
         const source = audioContext.createMediaStreamSource(geminiMediaStream); // Use the dedicated Gemini stream
         scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
 
@@ -412,9 +448,16 @@ document.addEventListener('DOMContentLoaded', () => {
           },
         });
 
+        // Wait for the session to be established before processing audio
+        await sessionPromise;
+
         scriptProcessor.onaudioprocess = (event) => {
           const inputData = event.inputBuffer.getChannelData(0);
-          const pcmBlob = createBlob(inputData);
+          
+          // Resample the audio to 16kHz before sending
+          const resampledData = resampleBuffer(inputData, 16000);
+          
+          const pcmBlob = createBlob(resampledData);
           sessionPromise?.then((session) => {
             session.sendRealtimeInput({ media: pcmBlob });
           });
