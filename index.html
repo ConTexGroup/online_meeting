@@ -3,8 +3,6 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- This base tag is crucial for GitHub Pages to find your CSS and JS files -->
-    <base href="/online_meeting/">
     <title>Conbello Textile Online Meeting</title>
     <link rel="stylesheet" href="index.css" />
     <script type="importmap">
@@ -15,20 +13,26 @@
   }
 }
 </script>
+    <!-- API Key Configuration -->
+    <script>
+      // Lütfen tırnak işaretlerinin içindeki metni kendi Google AI Studio API anahtarınızla değiştirin.
+      // API anahtarınızı buradan alabilirsiniz: https://aistudio.google.com/app/apikey
+      window.GEMINI_API_KEY = "API_ANAHTARINI_BURAYA_YAPIŞTIR";
+    </script>
   </head>
   <body>
     <header class="app-header">
       <h1>Conbello Textile Online Meeting</h1>
     </header>
     <main class="container">
-       <details class="accordion">
+       <details class="accordion" open>
         <summary>Language Settings</summary>
         <div class="language-controls">
             <div class="lang-select-group">
                 <label for="source-lang">Your Language:</label>
                 <select id="source-lang">
                     <option value="Turkish">Turkish</option>
-                    <option value="English">English</option>
+                    <option value="English" selected>English</option>
                     <option value="Spanish">Spanish</option>
                     <option value="French">French</option>
                     <option value="German">German</option>
@@ -38,7 +42,7 @@
             <div class="lang-select-group">
                 <label for="target-lang">Participant's Language:</label>
                 <select id="target-lang">
-                    <option value="English">English</option>
+                    <option value="English" selected>English</option>
                     <option value="Turkish">Turkish</option>
                     <option value="Spanish">Spanish</option>
                     <option value="French">French</option>
@@ -102,9 +106,7 @@
       <div id="error-container" class="error-container" style="display: none;"></div>
     </main>
 
-    <!-- Load API Key first -->
-    <script src="config.js"></script>
-    <!-- Then load the main application script -->
+    <!-- The main application script -->
     <script type="module" src="index.js"></script>
   </body>
 </html>

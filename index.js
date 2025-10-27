@@ -226,7 +226,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function setupRemoteStream(call, onStreamCallback) {
         call.on('stream', (remoteStream) => {
-            if (onStreamCallback) onStreamCallback();
+            if(onStreamCallback) {
+                onStreamCallback();
+            }
             updateStatus('listening', 'Connected & Listening');
             remoteParticipant.querySelector('.placeholder').style.display = 'none';
             remoteVideo.style.display = 'block';
