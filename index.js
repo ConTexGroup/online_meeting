@@ -6,7 +6,17 @@ import Peer from 'peerjs';
 import { GoogleGenAI, Modality } from "@google/genai";
 
 // --- State Variables ---
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+let ai = null; // Declare ai, but initialize lazily
+
+// Function to get the AI instance, creating it if it doesn't exist.
+// This prevents startup errors from blocking the UI.
+function getAiInstance() {
+    if (!ai) {
+        ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    }
+    return ai;
+}
+
 
 // --- Core Application Logic ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -348,11 +358,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function setupGeminiTranscription() {
+        const genAI = getAiInstance();
         audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
         const source = audioContext.createMediaStreamSource(mediaStream);
         scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
 
-        sessionPromise = ai.live.connect({
+        sessionPromise = genAI.live.connect({
           model: 'gemini-2.5-flash-native-audio-preview-09-2025',
           callbacks: {
             onopen: () => {},
@@ -423,7 +434,8 @@ document.addEventListener('DOMContentLoaded', () => {
         transcriptionPanel.scrollTop = transcriptionPanel.scrollHeight;
 
         try {
-            const response = await ai.models.generateContent({
+            const genAI = getAiInstance();
+            const response = await genAI.models.generateContent({
                 model: 'gemini-2.5-flash',
                 contents: [{ parts: [{ text: text }] }],
                 config: { systemInstruction: getSystemInstruction() }
