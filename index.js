@@ -55,10 +55,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- State Variables ---
     let isMeetingActive = false;
+    let isTranscriptionSetup = false;
     let sessionPromise = null;
     let mediaStream = null; // Original stream from getUserMedia
-    let geminiMediaStream = null; // Stream with CLONED audio track for Gemini
-    let peerMediaStream = null; // Stream with original tracks for PeerJS
+    let peerStream = null; // Processed stream for PeerJS
     let audioContext = null;
     let scriptProcessor = null;
     let translationDelay = 2000;
@@ -168,36 +168,60 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
-            const videoTracks = mediaStream.getVideoTracks();
-            const audioTracks = mediaStream.getAudioTracks();
-
-            if (audioTracks.length === 0 || videoTracks.length === 0) {
-                showError("Could not find required audio/video tracks in the stream.");
-                endMeeting();
-                return;
+            // --- NEW WEB AUDIO API PIPELINE ---
+            // 1. Create a single, central AudioContext.
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
             }
 
-            // --- The "Photocopier" Logic ---
-            // Clone the audio track to prevent resource conflicts between PeerJS and Web Audio API.
-            const originalAudioTrack = audioTracks[0];
-            const clonedAudioTrack = originalAudioTrack.clone();
+            // 2. Create a source node from the original microphone stream.
+            const sourceNode = audioContext.createMediaStreamSource(mediaStream);
 
-            // Create dedicated streams for each service.
-            peerMediaStream = new MediaStream([...videoTracks, originalAudioTrack]);
-            geminiMediaStream = new MediaStream([clonedAudioTrack]);
-            
+            // 3. Create a destination node. Its output stream will be sent to PeerJS.
+            const peerDestinationNode = audioContext.createMediaStreamAudioDestinationNode();
+
+            // 4. Create a script processor to capture raw audio for Gemini.
+            scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+
+            scriptProcessor.onaudioprocess = (event) => {
+                if (!sessionPromise) return; // Don't process until Gemini is ready.
+                const inputData = event.inputBuffer.getChannelData(0);
+                const resampledData = resampleBuffer(inputData, 16000); // Resampling is still critical.
+                const pcmBlob = createBlob(resampledData);
+                sessionPromise.then((session) => {
+                    if (session) {
+                        session.sendRealtimeInput({ media: pcmBlob });
+                    }
+                }).catch(e => {
+                     console.error("Error sending audio data:", e);
+                });
+            };
+
+            // 5. Connect the audio graph:
+            // Mic Source -> Gemini Processor -> PeerJS Destination
+            sourceNode.connect(scriptProcessor);
+            scriptProcessor.connect(peerDestinationNode);
+            // Connect processor to main output to prevent it from being garbage-collected in some browsers.
+            scriptProcessor.connect(audioContext.destination);
+
+            // 6. Create the final stream for PeerJS by combining video and the processed audio.
+            const videoTracks = mediaStream.getVideoTracks();
+            peerStream = new MediaStream([
+                ...videoTracks,
+                peerDestinationNode.stream.getAudioTracks()[0]
+            ]);
+
+            // 7. Initialize PeerJS with the clean, processed stream.
             initializePeer(isJoining);
-            await setupGeminiTranscription(); // Await this to catch setup errors
-            
+
             isMeetingActive = true;
             callInProgressControls.style.display = 'flex';
             setLoadingState(false);
             
         } catch (error) {
             console.error("Error during meeting start:", error);
-            const errorMessage = error instanceof Error && error.name === 'NotAllowedError'
-                ? 'Camera and microphone access was denied.'
-                : 'Failed to start. Check permissions and try again.';
+            const errorMessage = "Failed to start. Check permissions and try again.";
             showError(errorMessage);
             endMeeting();
         }
@@ -208,29 +232,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
         console.log("Ending meeting...");
 
-        // Stop media tracks from original and cloned streams
+        // Stop media tracks
         if (mediaStream) {
             mediaStream.getTracks().forEach(track => track.stop());
             mediaStream = null;
         }
-        if (geminiMediaStream) {
-            geminiMediaStream.getTracks().forEach(track => track.stop());
-            geminiMediaStream = null;
-        }
-        peerMediaStream = null; // This was just a container for original tracks
+        peerStream = null;
 
 
         // Close Gemini session
         if (sessionPromise) {
             sessionPromise.then(session => {
-                session.close();
+                if (session) session.close();
             }).catch(e => console.error("Error closing Gemini session:", e));
             sessionPromise = null;
         }
+        isTranscriptionSetup = false;
 
         // Stop audio processing
         if (scriptProcessor) {
             scriptProcessor.disconnect();
+            scriptProcessor.onaudioprocess = null;
             scriptProcessor = null;
         }
         if (audioContext && audioContext.state !== 'closed') {
@@ -314,7 +336,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         peer.on('call', (call) => {
-            call.answer(peerMediaStream); // Use the dedicated PeerJS stream
+            call.answer(peerStream); // Use the dedicated PeerJS stream from the audio pipeline
             setupRemoteStream(call);
         });
 
@@ -339,7 +361,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function connectToPeer(peerId) {
-        if (!peer || !peerMediaStream) return;
+        if (!peer || !peerStream) return;
         
         updateStatus('connecting', 'Connecting...');
 
@@ -348,7 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
             endMeeting();
         }, 15000);
 
-        const call = peer.call(peerId, peerMediaStream); // Use the dedicated PeerJS stream
+        const call = peer.call(peerId, peerStream); // Use the dedicated PeerJS stream
         setupRemoteStream(call, () => clearTimeout(connectionTimeout));
 
         dataConnection = peer.connect(peerId);
@@ -360,7 +382,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if(onStreamCallback) {
                 onStreamCallback();
             }
-            updateStatus('listening', 'Connected & Listening');
+            updateStatus('connected', 'Connected. Initializing transcription...');
             remoteParticipant.querySelector('.placeholder').style.display = 'none';
             remoteVideo.style.display = 'block';
             remoteVideo.srcObject = remoteStream;
@@ -382,13 +404,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 remoteNameTag.textContent = remoteName;
             }
         });
+        
+        // This 'open' event is a reliable indicator that a two-way connection is established.
+        // It's the perfect time to initialize the Gemini transcription service.
         dataConnection.on('open', () => {
+            if (!isTranscriptionSetup) {
+                setupGeminiTranscription().catch(error => {
+                    console.error("Gemini setup failed after connection:", error);
+                    showError("Peer connection successful, but real-time transcription failed to start.");
+                    updateStatus('error', 'Transcription Error');
+                });
+            }
             dataConnection.send({ type: 'name', name: localName });
         });
     }
     
     function resampleBuffer(inputBuffer, targetSampleRate) {
-        if (!audioContext) return inputBuffer;
+        if (!audioContext) return inputBuffer; // Should not happen
         const inputSampleRate = audioContext.sampleRate;
         if (inputSampleRate === targetSampleRate) {
             return inputBuffer;
@@ -415,45 +447,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     async function setupGeminiTranscription() {
+        if (isTranscriptionSetup) return;
+        isTranscriptionSetup = true;
+
+        updateStatus('connecting', 'Initializing transcription...');
         const genAI = getAiInstance();
-        let requiresResampling = false;
 
-        // --- The Final Fix: Create the AudioContext correctly from the start ---
-        try {
-            // Attempt to create the AudioContext with the exact 16kHz sample rate Gemini requires.
-            audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                sampleRate: 16000
-            });
-        } catch (e) {
-            // If the browser doesn't support forcing the sample rate, fall back to the default rate and enable manual resampling.
-            console.warn("Browser does not support 16kHz AudioContext. Falling back to manual resampling.", e);
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            requiresResampling = true;
-        }
-
-        if (!audioContext) {
-            throw new Error("Could not create AudioContext.");
-        }
-        
-        // Good practice: Resume the context if it's in a suspended state (required by some browsers).
-        if (audioContext.state === 'suspended') {
-            await audioContext.resume();
-        }
-
-        const source = audioContext.createMediaStreamSource(geminiMediaStream); // Use the dedicated Gemini stream
-        scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-
+        // The AudioContext and ScriptProcessor are already running from startMeeting.
+        // We just need to establish the Gemini connection. The `onaudioprocess`
+        // handler will automatically start sending data once `sessionPromise` resolves.
         sessionPromise = genAI.live.connect({
           model: 'gemini-2.5-flash-native-audio-preview-09-2025',
           callbacks: {
-            onopen: () => {},
+            onopen: () => {
+               updateStatus('listening', 'Connected & Listening');
+            },
             onmessage: (message) => {
               const text = message.serverContent?.inputTranscription?.text;
               if (text) {
                 handleLocalTranscription(text);
               }
             },
-            onerror: (e) => showError('Real-time connection error.'),
+            onerror: (e) => {
+                console.error("Gemini connection error:", e);
+                showError('Real-time connection error.');
+                updateStatus('error', 'Connection Error');
+            },
             onclose: (e) => {},
           },
           config: {
@@ -462,24 +481,8 @@ document.addEventListener('DOMContentLoaded', () => {
           },
         });
 
-        // Wait for the session to be established. If this fails, the error will be caught by the startMeeting function.
+        // Await the promise to catch immediate connection errors.
         await sessionPromise;
-
-        scriptProcessor.onaudioprocess = (event) => {
-          const inputData = event.inputBuffer.getChannelData(0);
-          
-          // Only resample the audio if our initial, preferred setup failed.
-          const audioDataToSend = requiresResampling 
-                ? resampleBuffer(inputData, 16000) 
-                : inputData;
-          
-          const pcmBlob = createBlob(audioDataToSend);
-          sessionPromise?.then((session) => {
-            session.sendRealtimeInput({ media: pcmBlob });
-          });
-        };
-        source.connect(scriptProcessor);
-        scriptProcessor.connect(audioContext.destination);
     }
 
     function handleLocalTranscription(text) {
