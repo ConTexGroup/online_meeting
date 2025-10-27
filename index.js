@@ -387,7 +387,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // --- The new "Paper Cutter" (Resampler) Function ---
     function resampleBuffer(inputBuffer, targetSampleRate) {
         if (!audioContext) return inputBuffer;
         const inputSampleRate = audioContext.sampleRate;
@@ -417,15 +416,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function setupGeminiTranscription() {
         const genAI = getAiInstance();
-        
-        // Create AudioContext with the browser's default sample rate. DO NOT force 16000.
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        let requiresResampling = false;
 
-        // Check if the context was created successfully
+        // --- The Final Fix: Create the AudioContext correctly from the start ---
+        try {
+            // Attempt to create the AudioContext with the exact 16kHz sample rate Gemini requires.
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                sampleRate: 16000
+            });
+        } catch (e) {
+            // If the browser doesn't support forcing the sample rate, fall back to the default rate and enable manual resampling.
+            console.warn("Browser does not support 16kHz AudioContext. Falling back to manual resampling.", e);
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            requiresResampling = true;
+        }
+
         if (!audioContext) {
             throw new Error("Could not create AudioContext.");
         }
         
+        // Good practice: Resume the context if it's in a suspended state (required by some browsers).
+        if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+        }
+
         const source = audioContext.createMediaStreamSource(geminiMediaStream); // Use the dedicated Gemini stream
         scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
 
@@ -448,16 +462,18 @@ document.addEventListener('DOMContentLoaded', () => {
           },
         });
 
-        // Wait for the session to be established before processing audio
+        // Wait for the session to be established. If this fails, the error will be caught by the startMeeting function.
         await sessionPromise;
 
         scriptProcessor.onaudioprocess = (event) => {
           const inputData = event.inputBuffer.getChannelData(0);
           
-          // Resample the audio to 16kHz before sending
-          const resampledData = resampleBuffer(inputData, 16000);
+          // Only resample the audio if our initial, preferred setup failed.
+          const audioDataToSend = requiresResampling 
+                ? resampleBuffer(inputData, 16000) 
+                : inputData;
           
-          const pcmBlob = createBlob(resampledData);
+          const pcmBlob = createBlob(audioDataToSend);
           sessionPromise?.then((session) => {
             session.sendRealtimeInput({ media: pcmBlob });
           });
