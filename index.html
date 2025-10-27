@@ -13,18 +13,26 @@
   }
 }
 </script>
-    <!-- API Key Configuration -->
-    <script>
-      // Lütfen tırnak işaretlerinin içindeki metni kendi Google AI Studio API anahtarınızla değiştirin.
-      // API anahtarınızı buradan alabilirsiniz: https://aistudio.google.com/app/apikey
-      window.GEMINI_API_KEY = "API_ANAHTARINI_BURAYA_YAPIŞTIR";
-    </script>
   </head>
   <body>
     <header class="app-header">
       <h1>Conbello Textile Online Meeting</h1>
     </header>
-    <main class="container">
+
+    <div id="api-key-container" class="api-key-container">
+        <h2>Enter Your Google AI Studio API Key</h2>
+        <p>
+            To use this application, you need a Google AI Studio API key. Your key is stored only in your browser for this session and is never shared.
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">Get your API key here.</a>
+        </p>
+        <div class="api-key-input-group">
+            <input type="password" id="api-key-input" placeholder="Paste your API key here">
+            <button id="save-api-key-btn">Start Application</button>
+        </div>
+        <p id="api-key-error" class="error-text" style="display: none;">Please enter a valid API key.</p>
+    </div>
+
+    <main class="container" style="display: none;">
        <details class="accordion" open>
         <summary>Language Settings</summary>
         <div class="language-controls">
