@@ -5,14 +5,19 @@
 import Peer from 'peerjs';
 import { GoogleGenAI, Modality } from "@google/genai";
 
-// --- AI Instance ---
-// Use the API key from the dedicated config file for deployment.
-const ai = new GoogleGenAI({ apiKey: window.GEMINI_API_KEY });
+// --- State Variables ---
+let ai; // Will be initialized after API key is provided
 
 // --- Core Application Logic ---
 document.addEventListener('DOMContentLoaded', () => {
 
     // --- DOM Elements ---
+    const apiKeyContainer = document.getElementById('api-key-container');
+    const apiKeyInput = document.getElementById('api-key-input');
+    const saveApiKeyBtn = document.getElementById('save-api-key-btn');
+    const apiKeyError = document.getElementById('api-key-error');
+    const mainContainer = document.querySelector('main.container');
+
     const setupControls = document.getElementById('setup-controls');
     const callInProgressControls = document.getElementById('call-in-progress-controls');
     const createMeetingBtn = document.getElementById('create-meeting-btn');
@@ -62,6 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeApp();
 
     // --- Event Listeners ---
+    saveApiKeyBtn.addEventListener('click', handleApiKeySave);
     createMeetingBtn.addEventListener('click', createMeeting);
     joinMeetingBtn.addEventListener('click', joinMeeting);
     endMeetingBtn.addEventListener('click', endMeeting);
@@ -79,10 +85,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Core App Logic ---
 
     function initializeApp() {
-        if (!window.GEMINI_API_KEY || window.GEMINI_API_KEY === "API_ANAHTARINI_BURAYA_YAPIŞTIR") {
-            showError("API Key is missing. Please add your key to config.js.");
-            createMeetingBtn.disabled = true;
-            joinMeetingBtn.disabled = true;
+        const savedApiKey = localStorage.getItem('gemini_api_key');
+        if (savedApiKey) {
+            apiKeyInput.value = savedApiKey;
+            handleApiKeySave();
         }
 
         const urlParams = new URLSearchParams(window.location.search);
@@ -94,6 +100,28 @@ document.addEventListener('DOMContentLoaded', () => {
         localName = nameInput.value.trim() || 'User';
         localNameTag.textContent = localName;
         remoteNameTag.textContent = remoteName;
+    }
+
+    function handleApiKeySave() {
+        const apiKey = apiKeyInput.value.trim();
+        if (!apiKey) {
+            apiKeyError.style.display = 'block';
+            return;
+        }
+        
+        apiKeyError.style.display = 'none';
+        
+        try {
+            ai = new GoogleGenAI({ apiKey });
+            localStorage.setItem('gemini_api_key', apiKey);
+            
+            apiKeyContainer.style.display = 'none';
+            mainContainer.style.display = 'flex';
+        } catch (error) {
+            console.error("Failed to initialize GoogleGenAI:", error);
+            apiKeyError.textContent = "Failed to initialize with this key. Please check the key and try again.";
+            apiKeyError.style.display = 'block';
+        }
     }
     
     function getSystemInstruction() {
@@ -122,6 +150,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function startMeeting(isJoining) {
+        if (!ai) {
+            showError("API Key not configured. Please enter your API key first.");
+            apiKeyContainer.style.display = 'block';
+            mainContainer.style.display = 'none';
+            return;
+        }
+
         setLoadingState(true, 'Starting...');
         hideError();
         transcriptionPanel.innerHTML = '';
