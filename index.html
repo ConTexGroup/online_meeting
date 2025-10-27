@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Conbello Textile Online Meeting</title>
+    <link rel="stylesheet" href="index.css" />
+    <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai",
+    "peerjs": "https://aistudiocdn.com/peerjs@^1.5.5"
+  }
+}
+</script>
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Conbello Textile Online Meeting</h1>
+    </header>
+    <main class="container">
+       <details class="accordion">
+        <summary>Language Settings</summary>
+        <div class="language-controls">
+            <div class="lang-select-group">
+                <label for="source-lang">Your Language:</label>
+                <select id="source-lang">
+                    <option value="Turkish">Turkish</option>
+                    <option value="English">English</option>
+                    <option value="Spanish">Spanish</option>
+                    <option value="French">French</option>
+                    <option value="German">German</option>
+                    <option value="Chinese">Chinese</option>
+                </select>
+            </div>
+            <div class="lang-select-group">
+                <label for="target-lang">Participant's Language:</label>
+                <select id="target-lang">
+                    <option value="English">English</option>
+                    <option value="Turkish">Turkish</option>
+                    <option value="Spanish">Spanish</option>
+                    <option value="French">French</option>
+                    <option value="German">German</option>
+                    <option value="Chinese">Chinese</option>
+                </select>
+            </div>
+        </div>
+      </details>
+      <div id="call-container" class="call-container">
+        <div id="local-participant" class="participant-view">
+            <video id="user-video" muted autoplay playsinline></video>
+            <div class="placeholder">
+                <p>Your camera feed will appear here.</p>
+            </div>
+            <div id="local-name-tag" class="name-tag">You</div>
+        </div>
+        <div id="remote-participant" class="participant-view">
+            <video id="remote-video" autoplay playsinline></video>
+            <div class="placeholder">
+                <p>Waiting for participant to join...</p>
+            </div>
+            <div id="remote-name-tag" class="name-tag">Participant</div>
+        </div>
+      </div>
+      <div id="transcription-panel" class="transcription-panel">
+        <!-- Subtitles will be injected here -->
+      </div>
+      <div class="controls">
+          <div id="setup-controls" class="setup-controls">
+              <div class="name-input-container">
+                  <label for="name-input">Your Name:</label>
+                  <input type="text" id="name-input" placeholder="Enter your name" value="User 1">
+              </div>
+              <div class="meeting-actions">
+                  <button id="create-meeting-btn">Create Meeting</button>
+                  <div class="join-group">
+                      <input type="text" id="meeting-id-input" placeholder="Paste Meeting ID">
+                      <button id="join-meeting-btn">Join Meeting</button>
+                  </div>
+              </div>
+          </div>
+          <div id="meeting-info-container" class="meeting-info-container" style="display: none;">
+              <span>Meeting ID:</span>
+              <span id="meeting-id-display"></span>
+              <button id="copy-id-btn">Copy Invitation Link</button>
+          </div>
+          <div id="call-in-progress-controls" class="call-in-progress-controls" style="display: none;">
+              <button id="end-meeting-btn">End Meeting</button>
+              <div class="slider-control">
+                  <label for="delay-slider">Translation Delay:</label>
+                  <input type="range" id="delay-slider" min="1000" max="5000" value="2000" step="100">
+                  <span id="delay-value">2.0s</span>
+              </div>
+              <div id="status" class="status-indicator" data-status="idle">
+                  <span class="status-dot"></span>
+                  <span class="status-text">Idle</span>
+              </div>
+          </div>
+      </div>
+      <div id="error-container" class="error-container" style="display: none;"></div>
+    </main>
+
+    <!-- Load API Key first -->
+    <script src="config.js"></script>
+    <!-- Then load the main application script -->
+    <script type="module" src="index.js"></script>
+  </body>
+</html>
