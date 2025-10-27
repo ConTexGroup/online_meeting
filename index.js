@@ -56,7 +56,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- State Variables ---
     let isMeetingActive = false;
     let sessionPromise = null;
-    let mediaStream = null;
+    let mediaStream = null; // Original stream from getUserMedia
+    let geminiMediaStream = null; // Stream with CLONED audio track for Gemini
+    let peerMediaStream = null; // Stream with original tracks for PeerJS
     let audioContext = null;
     let scriptProcessor = null;
     let translationDelay = 2000;
@@ -106,11 +108,14 @@ document.addEventListener('DOMContentLoaded', () => {
         hideError();
 
         try {
-            // Request permissions to ensure they are granted before proceeding
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-            // Stop the tracks immediately, we just wanted to get permission
-            stream.getTracks().forEach(track => track.stop());
+            // Request permissions AND get the stream to use later.
+            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
             
+            // Show the user their own video immediately as feedback.
+            localParticipant.querySelector('.placeholder').style.display = 'none';
+            userVideo.style.display = 'block';
+            userVideo.srcObject = mediaStream;
+
             permissionPrompt.style.display = 'none';
             setupControls.style.display = 'flex';
         } catch (error) {
@@ -156,12 +161,31 @@ document.addEventListener('DOMContentLoaded', () => {
         transcriptionPanel.innerHTML = '';
         setupControls.style.display = 'none';
 
-        try {
-            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-            localParticipant.querySelector('.placeholder').style.display = 'none';
-            userVideo.style.display = 'block';
-            userVideo.srcObject = mediaStream;
+        if (!mediaStream) {
+            showError("Media stream not found. Please enable your camera and microphone first.");
+            resetUI();
+            return;
+        }
 
+        try {
+            const videoTracks = mediaStream.getVideoTracks();
+            const audioTracks = mediaStream.getAudioTracks();
+
+            if (audioTracks.length === 0 || videoTracks.length === 0) {
+                showError("Could not find required audio/video tracks in the stream.");
+                endMeeting();
+                return;
+            }
+
+            // --- The "Photocopier" Logic ---
+            // Clone the audio track to prevent resource conflicts between PeerJS and Web Audio API.
+            const originalAudioTrack = audioTracks[0];
+            const clonedAudioTrack = originalAudioTrack.clone();
+
+            // Create dedicated streams for each service.
+            peerMediaStream = new MediaStream([...videoTracks, originalAudioTrack]);
+            geminiMediaStream = new MediaStream([clonedAudioTrack]);
+            
             initializePeer(isJoining);
             setupGeminiTranscription();
             
@@ -170,7 +194,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setLoadingState(false);
             
         } catch (error) {
-            console.error(error);
+            console.error("Error during meeting start:", error);
             const errorMessage = error instanceof Error && error.name === 'NotAllowedError'
                 ? 'Camera and microphone access was denied.'
                 : 'Failed to start. Check permissions and try again.';
@@ -184,11 +208,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         console.log("Ending meeting...");
 
-        // Stop media tracks
+        // Stop media tracks from original and cloned streams
         if (mediaStream) {
             mediaStream.getTracks().forEach(track => track.stop());
             mediaStream = null;
         }
+        if (geminiMediaStream) {
+            geminiMediaStream.getTracks().forEach(track => track.stop());
+            geminiMediaStream = null;
+        }
+        peerMediaStream = null; // This was just a container for original tracks
+
 
         // Close Gemini session
         if (sessionPromise) {
@@ -284,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         peer.on('call', (call) => {
-            call.answer(mediaStream);
+            call.answer(peerMediaStream); // Use the dedicated PeerJS stream
             setupRemoteStream(call);
         });
 
@@ -309,7 +339,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function connectToPeer(peerId) {
-        if (!peer || !mediaStream) return;
+        if (!peer || !peerMediaStream) return;
         
         updateStatus('connecting', 'Connecting...');
 
@@ -318,7 +348,7 @@ document.addEventListener('DOMContentLoaded', () => {
             endMeeting();
         }, 15000);
 
-        const call = peer.call(peerId, mediaStream);
+        const call = peer.call(peerId, peerMediaStream); // Use the dedicated PeerJS stream
         setupRemoteStream(call, () => clearTimeout(connectionTimeout));
 
         dataConnection = peer.connect(peerId);
@@ -360,7 +390,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function setupGeminiTranscription() {
         const genAI = getAiInstance();
         audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-        const source = audioContext.createMediaStreamSource(mediaStream);
+        const source = audioContext.createMediaStreamSource(geminiMediaStream); // Use the dedicated Gemini stream
         scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
 
         sessionPromise = genAI.live.connect({
