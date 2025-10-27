@@ -6,18 +6,12 @@ import Peer from 'peerjs';
 import { GoogleGenAI, Modality } from "@google/genai";
 
 // --- State Variables ---
-let ai; // Will be initialized after API key is provided
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // --- Core Application Logic ---
 document.addEventListener('DOMContentLoaded', () => {
 
     // --- DOM Elements ---
-    const apiKeyContainer = document.getElementById('api-key-container');
-    const apiKeyInput = document.getElementById('api-key-input');
-    const saveApiKeyBtn = document.getElementById('save-api-key-btn');
-    const apiKeyError = document.getElementById('api-key-error');
-    const mainContainer = document.querySelector('main.container');
-
     const setupControls = document.getElementById('setup-controls');
     const callInProgressControls = document.getElementById('call-in-progress-controls');
     const createMeetingBtn = document.getElementById('create-meeting-btn');
@@ -64,10 +58,19 @@ document.addEventListener('DOMContentLoaded', () => {
     let localTranscriptionTimer = null;
 
     // --- App Initialization ---
-    initializeApp();
+    // Check for meeting ID in URL and set up initial names
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlMeetingId = urlParams.get('meetingId');
+    if (urlMeetingId) {
+        meetingIdInput.value = urlMeetingId;
+    }
+
+    localName = nameInput.value.trim() || 'User';
+    localNameTag.textContent = localName;
+    remoteNameTag.textContent = remoteName;
+
 
     // --- Event Listeners ---
-    saveApiKeyBtn.addEventListener('click', handleApiKeySave);
     createMeetingBtn.addEventListener('click', createMeeting);
     joinMeetingBtn.addEventListener('click', joinMeeting);
     endMeetingBtn.addEventListener('click', endMeeting);
@@ -83,46 +86,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Core App Logic ---
-
-    function initializeApp() {
-        const savedApiKey = localStorage.getItem('gemini_api_key');
-        if (savedApiKey) {
-            apiKeyInput.value = savedApiKey;
-            handleApiKeySave();
-        }
-
-        const urlParams = new URLSearchParams(window.location.search);
-        const urlMeetingId = urlParams.get('meetingId');
-        if (urlMeetingId) {
-            meetingIdInput.value = urlMeetingId;
-        }
-
-        localName = nameInput.value.trim() || 'User';
-        localNameTag.textContent = localName;
-        remoteNameTag.textContent = remoteName;
-    }
-
-    function handleApiKeySave() {
-        const apiKey = apiKeyInput.value.trim();
-        if (!apiKey) {
-            apiKeyError.style.display = 'block';
-            return;
-        }
-        
-        apiKeyError.style.display = 'none';
-        
-        try {
-            ai = new GoogleGenAI({ apiKey });
-            localStorage.setItem('gemini_api_key', apiKey);
-            
-            apiKeyContainer.style.display = 'none';
-            mainContainer.style.display = 'flex';
-        } catch (error) {
-            console.error("Failed to initialize GoogleGenAI:", error);
-            apiKeyError.textContent = "Failed to initialize with this key. Please check the key and try again.";
-            apiKeyError.style.display = 'block';
-        }
-    }
     
     function getSystemInstruction() {
         const sourceLang = sourceLangSelect.value;
@@ -150,13 +113,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function startMeeting(isJoining) {
-        if (!ai) {
-            showError("API Key not configured. Please enter your API key first.");
-            apiKeyContainer.style.display = 'block';
-            mainContainer.style.display = 'none';
-            return;
-        }
-
         setLoadingState(true, 'Starting...');
         hideError();
         transcriptionPanel.innerHTML = '';
@@ -186,11 +142,79 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function endMeeting() {
-        // Just reload the page. This is the most reliable way to reset all state
-        // (PeerJS connections, media streams, audio contexts, Gemini sessions)
-        // and prevent the application from entering a broken, crashed state.
-        // It's a clean slate every time.
-        window.location.reload();
+        if (!isMeetingActive) return;
+
+        console.log("Ending meeting...");
+
+        // Stop media tracks
+        if (mediaStream) {
+            mediaStream.getTracks().forEach(track => track.stop());
+            mediaStream = null;
+        }
+
+        // Close Gemini session
+        if (sessionPromise) {
+            sessionPromise.then(session => {
+                session.close();
+            }).catch(e => console.error("Error closing Gemini session:", e));
+            sessionPromise = null;
+        }
+
+        // Stop audio processing
+        if (scriptProcessor) {
+            scriptProcessor.disconnect();
+            scriptProcessor = null;
+        }
+        if (audioContext && audioContext.state !== 'closed') {
+            audioContext.close().catch(e => console.error("Error closing AudioContext:", e));
+            audioContext = null;
+        }
+
+        // Disconnect PeerJS
+        if (dataConnection) {
+            dataConnection.close();
+            dataConnection = null;
+        }
+        if (peer) {
+            peer.destroy();
+            peer = null;
+        }
+
+        isMeetingActive = false;
+        resetUI();
+    }
+    
+    function resetUI() {
+        // Hide in-progress controls and show setup controls
+        callInProgressControls.style.display = 'none';
+        meetingInfoContainer.style.display = 'none';
+        setupControls.style.display = 'flex';
+
+        // Reset video elements
+        userVideo.srcObject = null;
+        remoteVideo.srcObject = null;
+        userVideo.style.display = 'none';
+        remoteVideo.style.display = 'none';
+        localParticipant.querySelector('.placeholder').style.display = 'flex';
+        remoteParticipant.querySelector('.placeholder').style.display = 'flex';
+        
+        // Clear transcription panel and error messages
+        transcriptionPanel.innerHTML = '';
+        hideError();
+
+        // Reset meeting ID fields
+        meetingIdDisplay.textContent = '';
+        meetingIdInput.value = '';
+
+        // Reset status indicator
+        updateStatus('idle', 'Idle');
+        
+        // Re-enable inputs
+        nameInput.disabled = false;
+        meetingIdInput.disabled = false;
+        
+        // Reset button states
+        setLoadingState(false);
     }
 
 
