@@ -100,11 +100,10 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (savedApiKey) {
             initializeAi(savedApiKey);
-        } else if (process.env.API_KEY) {
-            console.log("Found API key in environment variables.");
-            initializeAi(process.env.API_KEY);
         } else {
-            console.log("API key not found. Showing input form.");
+            // If no key is in local storage, always show the input form.
+            // The check for process.env.API_KEY is removed as it causes errors in the browser.
+            console.log("API key not found in storage. Showing input form.");
             apiKeySection.style.display = 'block';
             mainContainer.style.display = 'none';
         }
