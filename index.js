@@ -1,3 +1,6 @@
+
+
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -11,13 +14,14 @@ const API_KEY_STORAGE_KEY = 'googleAiApiKey';
 
 // --- Core Application Logic ---
 document.addEventListener('DOMContentLoaded', () => {
+    console.log("v3: Push-to-talk enabled."); // Force cache update
+
     // --- DOM Elements ---
     const apiKeySection = document.getElementById('api-key-section');
     const apiKeyInput = document.getElementById('api-key-input');
     const setApiKeyBtn = document.getElementById('set-api-key-btn');
     const apiKeyError = document.getElementById('api-key-error');
     const mainContainer = document.getElementById('main-container');
-    const changeApiKeyBtn = document.getElementById('change-api-key-btn');
 
     const setupControls = document.getElementById('setup-controls');
     const callInProgressControls = document.getElementById('call-in-progress-controls');
@@ -39,8 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const userVideo = document.getElementById('user-video');
     const remoteVideo = document.getElementById('remote-video');
     
-    const delaySlider = document.getElementById('delay-slider');
-    const delayValueSpan = document.getElementById('delay-value');
+    const talkBtn = document.getElementById('talk-btn');
     const nameInput = document.getElementById('name-input');
     const localNameTag = document.getElementById('local-name-tag');
     const remoteNameTag = document.getElementById('remote-name-tag');
@@ -50,20 +53,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- State Variables ---
     let isMeetingActive = false;
+    let isTalking = false;
     let sessionPromise = null;
     let mediaStream = null;
     let audioContext = null;
+    let audioSourceNode = null;
     let scriptProcessor = null;
-    let translationDelay = 2000;
     let peer = null;
     let dataConnection = null;
     let meetingId = null;
-    let localName = 'User 1';
+    let localName = 'Conbello Textile';
     let remoteName = 'Participant';
 
     let localTranscriptionBuffer = '';
-    let localTranscriptionTimer = null;
-
+    
     // --- App Initialization ---
     initializeApp();
 
@@ -74,24 +77,37 @@ document.addEventListener('DOMContentLoaded', () => {
             handleApiKeySubmit();
         }
     });
-    changeApiKeyBtn.addEventListener('click', () => {
-        localStorage.removeItem(API_KEY_STORAGE_KEY);
-        location.reload();
-    });
-
+   
     createMeetingBtn.addEventListener('click', createMeeting);
     joinMeetingBtn.addEventListener('click', joinMeeting);
     endMeetingBtn.addEventListener('click', endMeeting);
     copyIdBtn.addEventListener('click', copyInvitationLink);
 
-    delaySlider.addEventListener('input', (e) => {
-        translationDelay = parseInt(e.target.value, 10);
-        delayValueSpan.textContent = `${(translationDelay / 1000).toFixed(1)}s`;
-    });
     nameInput.addEventListener('input', () => {
-        localName = nameInput.value.trim() || 'User';
+        localName = nameInput.value.trim() || 'Conbello Textile';
         localNameTag.textContent = localName;
     });
+
+    // Push-to-Talk Listeners
+    talkBtn.addEventListener('mousedown', startTranscribing);
+    talkBtn.addEventListener('mouseup', stopTranscribing);
+    talkBtn.addEventListener('mouseleave', stopTranscribing); // In case mouse slides off
+    talkBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startTranscribing(); }, { passive: false });
+    talkBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopTranscribing(); });
+    
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' && !e.repeat && isMeetingActive) {
+            e.preventDefault();
+            startTranscribing();
+        }
+    });
+    window.addEventListener('keyup', (e) => {
+        if (e.code === 'Space' && isMeetingActive) {
+            e.preventDefault();
+            stopTranscribing();
+        }
+    });
+
 
     // --- Core App Logic ---
 
@@ -101,9 +117,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (savedApiKey) {
             initializeAi(savedApiKey);
         } else {
-            // If no key is in local storage, always show the input form.
-            // The check for process.env.API_KEY is removed as it causes errors in the browser.
-            console.log("API key not found in storage. Showing input form.");
             apiKeySection.style.display = 'block';
             mainContainer.style.display = 'none';
         }
@@ -114,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
             meetingIdInput.value = urlMeetingId;
         }
 
-        localName = nameInput.value.trim() || 'User';
+        localName = nameInput.value.trim() || 'Conbello Textile';
         localNameTag.textContent = localName;
         remoteNameTag.textContent = remoteName;
     }
@@ -132,10 +145,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function initializeAi(apiKey, fromUserInput = false) {
         try {
             ai = new GoogleGenAI({ apiKey: apiKey });
-            // Test the key with a simple request
-            // This is a placeholder, a lightweight model check would be ideal
-            // For now, we assume construction success means a valid-looking key
-            
             apiKeySection.style.display = 'none';
             mainContainer.style.display = 'flex';
             apiKeyError.style.display = 'none';
@@ -196,7 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
             userVideo.srcObject = mediaStream;
 
             initializePeer(isJoining);
-            setupGeminiTranscription();
+            await setupGeminiTranscription();
             
             isMeetingActive = true;
             callInProgressControls.style.display = 'flex';
@@ -225,6 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (scriptProcessor) {
             scriptProcessor.disconnect();
             scriptProcessor = null;
+            audioSourceNode = null;
         }
         if (audioContext && audioContext.state !== 'closed') {
              audioContext.close().catch(e => console.error("Error closing AudioContext:", e));
@@ -274,10 +284,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Reset state variables
         meetingId = null;
         localTranscriptionBuffer = '';
-        if (localTranscriptionTimer) {
-            clearTimeout(localTranscriptionTimer);
-            localTranscriptionTimer = null;
-        }
+        isTalking = false;
+        talkBtn.classList.remove('talking');
         
         remoteName = 'Participant';
         remoteNameTag.textContent = remoteName;
@@ -363,7 +371,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if(onStreamCallback) {
                 onStreamCallback();
             }
-            updateStatus('listening', 'Connected & Listening');
+            updateStatus('ready', 'Hold to Talk');
             remoteParticipant.querySelector('.placeholder').style.display = 'none';
             remoteVideo.style.display = 'block';
             remoteVideo.srcObject = remoteStream;
@@ -390,9 +398,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function setupGeminiTranscription() {
+    async function setupGeminiTranscription() {
         audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-        const source = audioContext.createMediaStreamSource(mediaStream);
+        audioSourceNode = audioContext.createMediaStreamSource(mediaStream);
         scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
 
         sessionPromise = ai.live.connect({
@@ -413,6 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
             inputAudioTranscription: {},
           },
         });
+        await sessionPromise; // Ensure session is connected before we allow talking
 
         scriptProcessor.onaudioprocess = (event) => {
           const inputData = event.inputBuffer.getChannelData(0);
@@ -421,26 +430,42 @@ document.addEventListener('DOMContentLoaded', () => {
             session.sendRealtimeInput({ media: pcmBlob });
           });
         };
-        source.connect(scriptProcessor);
-        scriptProcessor.connect(audioContext.destination);
+        audioSourceNode.connect(scriptProcessor);
+        // We disconnect immediately; will be reconnected on push-to-talk
+        scriptProcessor.disconnect();
     }
 
-    function handleLocalTranscription(text) {
-        if (!text.trim() && localTranscriptionBuffer.length === 0) return;
-        localTranscriptionBuffer += text;
+    function startTranscribing() {
+        if (!isMeetingActive || isTalking || !scriptProcessor || !audioContext) return;
+        isTalking = true;
+        talkBtn.classList.add('talking');
+        updateStatus('listening', 'Listening...');
+        // Connect the processor to start sending audio
+        scriptProcessor.connect(audioContext.destination);
+    }
+    
+    function stopTranscribing() {
+        if (!isMeetingActive || !isTalking || !scriptProcessor) return;
+        isTalking = false;
+        talkBtn.classList.remove('talking');
+        updateStatus('ready', 'Hold to Talk');
+        // Disconnect the processor to stop sending audio
+        scriptProcessor.disconnect();
 
-        if (dataConnection?.open) {
-            dataConnection.send({ type: 'transcription', text: text });
-        }
-
-        if (localTranscriptionTimer) clearTimeout(localTranscriptionTimer);
-        
-        const lineToTranslate = localTranscriptionBuffer;
-        
-        localTranscriptionTimer = window.setTimeout(() => {
-            appendAndTranslate(lineToTranslate, 'You');
+        // If there's any remaining text in the buffer, send it immediately
+        if (localTranscriptionBuffer.trim().length > 0) {
+            appendAndTranslate(localTranscriptionBuffer, 'You');
+            if (dataConnection?.open) {
+                dataConnection.send({ type: 'transcription', text: localTranscriptionBuffer });
+            }
             localTranscriptionBuffer = '';
-        }, translationDelay);
+        }
+    }
+
+
+    function handleLocalTranscription(text) {
+        if (!isTalking) return; // Ignore transcription if not actively talking
+        localTranscriptionBuffer += text;
     }
 
     async function appendAndTranslate(text, speaker) {

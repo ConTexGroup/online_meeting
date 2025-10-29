@@ -23,7 +23,7 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        height: 100vh;
+        min-height: 100vh;
         box-sizing: border-box;
       }
 
@@ -132,7 +132,7 @@
           display: flex;
           gap: 24px;
           align-items: center;
-          justify-content: space-between;
+          justify-content: flex-start;
           border-top: 1px solid #3c3c3c;
           margin-top: 8px;
           padding-top: 16px;
@@ -159,15 +159,6 @@
           font-size: 14px;
       }
       
-      .change-key-button {
-        background-color: #3a3a3d;
-        padding: 8px 16px;
-        font-size: 14px;
-      }
-      .change-key-button:hover:not(:disabled) {
-        background-color: #4a4a4d;
-      }
-
 
       /* Call Container */
       .call-container {
@@ -327,48 +318,39 @@
           border-color: #0e639c;
       }
 
-      /* Slider Control */
-      .slider-control {
+      /* Talk Button */
+      #talk-btn {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        background-color: #3a3a3d;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        border: 4px solid #555;
+        transition: background-color 0.1s, border-color 0.1s;
+        -webkit-tap-highlight-color: transparent; /* Disable blue tap highlight on mobile */
+      }
+      #talk-btn.talking {
+        background-color: #2dc574; /* Green when talking */
+        border-color: #fff;
+      }
+      #talk-btn svg {
+        width: 40px;
+        height: 40px;
+        fill: #d4d4d4;
+      }
+      .talk-container {
           display: flex;
+          flex-direction: column;
           align-items: center;
           gap: 8px;
-          color: #ccc;
       }
-
-      #delay-value {
-          font-weight: bold;
-          min-width: 40px; /* Prevents layout shift */
+      .talk-hint {
+          color: #aaa;
+          font-size: 0.9em;
       }
-
-      input[type="range"] {
-          -webkit-appearance: none;
-          appearance: none;
-          width: 120px;
-          height: 8px;
-          background: #444;
-          border-radius: 5px;
-          outline: none;
-          cursor: pointer;
-      }
-
-      input[type="range"]::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          appearance: none;
-          width: 18px;
-          height: 18px;
-          background: #0e639c;
-          border-radius: 50%;
-          border: 2px solid #fff;
-      }
-
-      input[type="range"]::-moz-range-thumb {
-          width: 16px;
-          height: 16px;
-          background: #0e639c;
-          border-radius: 50%;
-          border: 2px solid #fff;
-      }
-
+      
 
       .status-indicator {
           display: flex;
@@ -399,6 +381,10 @@
 
       .status-indicator[data-status="error"] .status-dot {
           background-color: #d9534f; /* Red */
+      }
+      
+      .status-indicator[data-status="ready"] .status-dot {
+          background-color: #4daafc; /* Blue for ready */
       }
 
       @keyframes pulse {
@@ -458,6 +444,55 @@
           background-color: rgba(244, 71, 71, 0.1);
           margin-top: 10px;
       }
+
+      /* --- Mobile Responsive Styles --- */
+      @media (max-width: 768px) {
+        body {
+            height: auto;
+        }
+        .container {
+            padding: 10px;
+        }
+        h1 {
+            font-size: 1.3em;
+        }
+        .call-container {
+            flex-direction: column;
+        }
+        .participant-view {
+            width: 100%;
+        }
+        .setup-controls {
+            flex-direction: column;
+            gap: 12px;
+            align-items: stretch;
+        }
+        .meeting-actions, .join-group {
+            flex-direction: column;
+            width: 100%;
+            gap: 12px;
+        }
+        #name-input, #meeting-id-input {
+            width: 100%;
+            box-sizing: border-box;
+            text-align: center;
+        }
+        .name-input-container {
+            justify-content: center;
+        }
+        .language-controls, .language-options {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        .call-in-progress-controls {
+            flex-direction: column;
+            gap: 16px;
+        }
+        .transcription-panel {
+            height: 200px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -508,7 +543,6 @@
                     </select>
                 </div>
             </div>
-            <button id="change-api-key-btn" class="change-key-button">Change API Key</button>
         </div>
       </details>
       <div id="call-container" class="call-container">
@@ -534,7 +568,7 @@
           <div id="setup-controls" class="setup-controls">
               <div class="name-input-container">
                   <label for="name-input">Your Name:</label>
-                  <input type="text" id="name-input" placeholder="Enter your name" value="User 1">
+                  <input type="text" id="name-input" placeholder="Enter your name" value="Conbello Textile">
               </div>
               <div class="meeting-actions">
                   <button id="create-meeting-btn">Create Meeting</button>
@@ -551,10 +585,11 @@
           </div>
           <div id="call-in-progress-controls" class="call-in-progress-controls" style="display: none;">
               <button id="end-meeting-btn">End Meeting</button>
-              <div class="slider-control">
-                  <label for="delay-slider">Translation Delay:</label>
-                  <input type="range" id="delay-slider" min="1000" max="5000" value="2000" step="100">
-                  <span id="delay-value">2.0s</span>
+              <div class="talk-container">
+                <button id="talk-btn" title="Hold to Talk">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--!Font Awesome Free 6.5.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2024 Fonticons, Inc.--><path d="M192 0C139 0 96 43 96 96V256c0 53 43 96 96 96s96-43 96-96V96c0-53-43-96-96-96zM64 216c0-21.9-14.5-39.8-34.1-45.3s-41.6 2.3-54.4 20.9s-12.8 41.6 2.3 54.4C-4.1 260.5 16 277.9 16 304v48c0 26.5 21.5 48 48 48H80c26.5 0 48-21.5 48-48V304c0-26.1 20.1-43.5 39.7-48.8c19.6-5.3 41.1 2.4 53.9 21.1s12.8 41.6-2.3 54.4c-17.6 15.1-37.8 32.4-37.8 58.3v48c0 26.5 21.5 48 48 48h16c26.5 0 48-21.5 48-48v-48c0-25.9-20.2-43.2-37.8-58.3c-15.1-12.8-26.2-32.5-2.3-54.4s34.4-26.4 53.9-21.1C335.9 260.5 368 277.9 368 304v48c0 26.5 21.5 48 48 48h16c26.5 0 48-21.5 48-48V304c0-26.1-20.1-43.5-39.7-48.8c-19.6-5.3-41.1 2.4-53.9 21.1s-12.8 41.6 2.3 54.4c17.6 15.1 37.8 32.4 37.8 58.3v48c0 26.5-21.5 48-48 48h-16c-26.5 0-48-21.5-48-48v-48c0-25.9-20.2-43.2-37.8-58.3c-15.1-12.8-26.2-32.5-2.3-54.4s34.4-26.4 53.9-21.1C220.1 216.2 256 233.9 256 264V96c0-17.7-14.3-32-32-32s-32 14.3-32 32V264c0 17.7-14.3 32-32 32s-32-14.3-32-32V96c0-17.7-14.3-32-32-32s-32 14.3-32 32V216z"/></svg>
+                </button>
+                <span class="talk-hint">Hold SPACE or button to talk</span>
               </div>
               <div id="status" class="status-indicator" data-status="idle">
                   <span class="status-dot"></span>
