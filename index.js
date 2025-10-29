@@ -1,6 +1,4 @@
 
-
-
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -14,7 +12,7 @@ const API_KEY_STORAGE_KEY = 'googleAiApiKey';
 
 // --- Core Application Logic ---
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("v3: Push-to-talk enabled."); // Force cache update
+    console.log("v4: Transcription race condition fixed."); // Force cache update
 
     // --- DOM Elements ---
     const apiKeySection = document.getElementById('api-key-section');
@@ -66,6 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let remoteName = 'Participant';
 
     let localTranscriptionBuffer = '';
+    let finalizationTimeout = null;
     
     // --- App Initialization ---
     initializeApp();
@@ -286,6 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
         localTranscriptionBuffer = '';
         isTalking = false;
         talkBtn.classList.remove('talking');
+        clearTimeout(finalizationTimeout);
         
         remoteName = 'Participant';
         remoteNameTag.textContent = remoteName;
@@ -437,6 +437,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function startTranscribing() {
         if (!isMeetingActive || isTalking || !scriptProcessor || !audioContext) return;
+        
+        clearTimeout(finalizationTimeout); // Cancel any pending finalization
         isTalking = true;
         talkBtn.classList.add('talking');
         updateStatus('listening', 'Listening...');
@@ -452,19 +454,22 @@ document.addEventListener('DOMContentLoaded', () => {
         // Disconnect the processor to stop sending audio
         scriptProcessor.disconnect();
 
-        // If there's any remaining text in the buffer, send it immediately
-        if (localTranscriptionBuffer.trim().length > 0) {
-            appendAndTranslate(localTranscriptionBuffer, 'You');
-            if (dataConnection?.open) {
-                dataConnection.send({ type: 'transcription', text: localTranscriptionBuffer });
+        // Wait a moment for any final transcription chunks to arrive
+        clearTimeout(finalizationTimeout);
+        finalizationTimeout = setTimeout(() => {
+            if (localTranscriptionBuffer.trim().length > 0) {
+                const fullSentence = localTranscriptionBuffer.trim();
+                appendAndTranslate(fullSentence, 'You');
+                if (dataConnection?.open) {
+                    dataConnection.send({ type: 'transcription', text: fullSentence });
+                }
+                localTranscriptionBuffer = '';
             }
-            localTranscriptionBuffer = '';
-        }
+        }, 500); // 500ms safety buffer
     }
 
 
     function handleLocalTranscription(text) {
-        if (!isTalking) return; // Ignore transcription if not actively talking
         localTranscriptionBuffer += text;
     }
 
